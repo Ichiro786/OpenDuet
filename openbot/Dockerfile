@@ -89,7 +89,7 @@ COPY toolkit toolkit
 # `server/src/tenant-package`, so the app cannot be built without it.
 COPY server server
 COPY examples examples
-RUN bun run --cwd app build
+RUN TENANT_PACKAGE_DIR=../examples/openduet bun scripts/generate-app-config.ts && bun run --cwd app build
 
 
 FROM base AS runtime
