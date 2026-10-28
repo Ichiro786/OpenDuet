@@ -528,6 +528,36 @@ function stagesAFile(schema: unknown, depth = 0): FileVerdict {
  * publish nothing, and a vendor that stated no requirement has stated none. A schema that is present
  * and is not an object is unreadable and answers YES.
  */
+/**
+ * SYED/DEPLOY PATCH (2026-10-28): an action whose only file-staging inputs are OPTIONAL top-level
+ * parameters (Gmail's `attachment` on GMAIL_SEND_EMAIL, GMAIL_CREATE_EMAIL_DRAFT,
+ * GMAIL_REPLY_TO_THREAD) is offered with those parameters omitted from its schema, instead of
+ * being dropped whole. A model then cannot invent a staging key, because it is never asked for
+ * one; text-only calls still work. An action that REQUIRES a file, or hides one anywhere other
+ * than an optional top-level property, is left as it was and the filter below still drops it.
+ */
+function stripOptionalFileParameters<
+  T extends { inputParameters?: Record<string, unknown> },
+>(action: T): T {
+  const node = schemaNode(action);
+  if (!node) return action;
+  const params = schemaNode(node.inputParameters);
+  if (!params || stagesAFile(params) !== true) return action;
+  const properties = schemaNode(params.properties);
+  if (!properties) return action;
+  const required = Array.isArray(params.required) ? params.required : [];
+  const kept: Record<string, unknown> = {};
+  let dropped = 0;
+  for (const [key, child] of Object.entries(properties)) {
+    if (!required.includes(key) && stagesAFile(child) === true) dropped++;
+    else kept[key] = child;
+  }
+  if (dropped === 0) return action;
+  const stripped = { ...params, properties: kept };
+  if (stagesAFile(stripped) !== false) return action;
+  return { ...action, inputParameters: stripped } as T;
+}
+
 export function asksForArguments(schema: unknown, depth = 0): boolean {
   if (depth > SCHEMA_DEPTH) return true;
   if (schema === undefined || schema === null) return false;
@@ -707,7 +737,9 @@ export async function listTools(connection: {
    * that IS offered is still a total refusal, for the reasons each of them gives, because that one
    * really does reach the map.
    */
-  const read = actions.map((action, position) => ({
+  const read = actions
+    .map(stripOptionalFileParameters)
+    .map((action, position) => ({
     action,
     /*
      * NAMED BY ITS SLUG WHERE THERE IS ONE AND BY ITS PLACE WHERE THERE IS NOT, because this runs

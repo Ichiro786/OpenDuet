@@ -197,6 +197,8 @@ const FILE_PROPERTY = { type: "string", file_uploadable: true };
 function underProperty(keyword: string, sub: unknown): Record<string, unknown> {
   return {
     type: "object",
+    // Required, so the syed/deploy optional-file strip leaves it to the filter under test.
+    required: ["field"],
     properties: { field: { type: "object", [keyword]: sub } },
   };
 }
@@ -1823,6 +1825,7 @@ describe("listing an app's actions", () => {
         version: "20260903_00",
         inputParameters: {
           type: "object",
+          required: ["attachment"],
           properties: { attachment: FILE_PROPERTY },
         },
       },
@@ -1833,6 +1836,7 @@ describe("listing an app's actions", () => {
         version: "20260903_00",
         inputParameters: {
           type: "object",
+          required: ["attachment"],
           properties: { attachment: FILE_PROPERTY },
         },
       },
@@ -1927,6 +1931,7 @@ describe("listing an app's actions", () => {
                 ...action,
                 inputParameters: {
                   type: "object",
+                  required: ["attachment"],
                   properties: { attachment: FILE_PROPERTY },
                 },
               },
@@ -3535,5 +3540,49 @@ describe("what a failed call is evidence of", () => {
     );
 
     expect(calls.map((call) => call.connectedAccountId)).toEqual([undefined]);
+  });
+});
+
+describe("SYED/DEPLOY: an optional file parameter is omitted rather than the action dropped", () => {
+  test("Gmail send keeps its text fields and loses only the attachment; a required file is still dropped", async () => {
+    useComposioClient(
+      recording({
+        listActions: async () => [
+          GMAIL_READ,
+          {
+            slug: "GMAIL_SEND_EMAIL",
+            tags: ["createHint"],
+            version: "20260903_00",
+            inputParameters: {
+              type: "object",
+              required: ["recipient_email"],
+              properties: {
+                recipient_email: { type: "string" },
+                body: { type: "string" },
+                attachment: { type: "object", file_uploadable: true },
+              },
+            },
+          },
+          {
+            slug: "GOOGLEDRIVE_UPLOAD_FILE",
+            version: "20260903_00",
+            inputParameters: {
+              type: "object",
+              required: ["file_to_upload"],
+              properties: { file_to_upload: FILE_PROPERTY },
+            },
+          },
+        ],
+      }).client,
+    );
+    const listed = await listTools({ url: "composio://gmail" });
+    expect(listed.map((tool) => tool.name)).toEqual(["GMAIL_FETCH_EMAILS", "GMAIL_SEND_EMAIL"]);
+    const send = listed.find((tool) => tool.name === "GMAIL_SEND_EMAIL");
+    expect(send?.effect).toBe("write");
+    expect(send?.inputSchema).toEqual({
+      type: "object",
+      required: ["recipient_email"],
+      properties: { recipient_email: { type: "string" }, body: { type: "string" } },
+    });
   });
 });
