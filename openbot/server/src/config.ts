@@ -544,6 +544,22 @@ function keyEncryptionKey(environment: Environment): string {
  * flag on so a clone runs, and README's "Deploy it" hands that same `.env` to `docker run`; what
  * separates those two is an address, which is what this reads.
  */
+/** Syed deploy: OPENDUET_GATE_PUBLIC_URL, an https origin with no path, or undefined. */
+function gatePublicOrigin(environment: Environment): string | undefined {
+  const value = optional(environment, "OPENDUET_GATE_PUBLIC_URL");
+  if (!value) return undefined;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("OPENDUET_GATE_PUBLIC_URL must be an https origin.");
+  }
+  if (url.protocol !== "https:" || (url.pathname !== "/" && url.pathname !== "")) {
+    throw new Error("OPENDUET_GATE_PUBLIC_URL must be an https origin with no path.");
+  }
+  return url.origin;
+}
+
 function singleUserAllowed(
   environment: Environment,
   hasProvider: boolean,
@@ -1369,8 +1385,17 @@ export function loadConfig(
     : undefined;
   const managedAgent = managedAgentConfig(environment);
   const githubApp = githubAppConfig(environment);
+  /*
+   * Syed deploy: a single-user deployment served only through an authenticating gate keeps its
+   * loopback OPENBOT_PUBLIC_URL / OPENBOT_APP_URL (so the single-user address check still holds),
+   * and names the gate's public https origin here. It is used ONLY to build the addresses vendors
+   * send people back to (OAuth redirect URIs, broker return pages), never for the reachability check.
+   */
+  const gatePublicUrl = gatePublicOrigin(environment);
   const publicUrl = (
-    optional(environment, "OPENBOT_PUBLIC_URL") ?? auth?.baseUrl
+    gatePublicUrl ??
+    optional(environment, "OPENBOT_PUBLIC_URL") ??
+    auth?.baseUrl
   )?.replace(/\/+$/, "");
   // GitHub sends people back to this address after they approve. Without it linking is silently
   // switched off, so say so at start-up instead.
@@ -1402,6 +1427,7 @@ export function loadConfig(
     brokerProvider: brokerProvider(environment),
     publicUrl,
     appUrl: (
+      gatePublicUrl ??
       optional(environment, "OPENBOT_APP_URL") ??
       commaSeparated(environment, "TRUSTED_ORIGINS")[0] ??
       optional(environment, "OPENBOT_PUBLIC_URL") ??
